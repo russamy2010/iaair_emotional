@@ -15,7 +15,7 @@ RATINGS_FILE = os.path.join(DATA_DIR, "emotion_ratings.csv")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 # Define emotion labels
-EMOTION_LABELS = ["Joy", "Sadness", "Acceptance", "Disgust", "Fear", "Anger", "Surprise, "Anticipation"]
+EMOTION_LABELS = ["Joy", "Sadness", "Acceptance", "Disgust", "Fear", "Anger", "Surprise", "Anticipation"]
 
 # Initialize ratings CSV if it doesn't exist
 if not os.path.exists(RATINGS_FILE):
