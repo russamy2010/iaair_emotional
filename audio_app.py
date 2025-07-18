@@ -58,8 +58,11 @@ if selection_method == "Select from existing files":
             try:
                 with open(audio_path, "rb") as f:
                     audio_bytes = f.read()
-                st.audio(audio_bytes, format=f'audio/{os.path.splitext(selected_preloaded_audio)[1].lstrip(".")}')
-                st.success(f"Playing '{selected_preloaded_audio}' from repository.")
+                # Corrected: Use the appropriate MIME type for the format
+                file_extension = os.path.splitext(selected_preloaded_audio)[1].lower()
+                audio_format = f"audio/{file_extension.lstrip('.')}"
+                st.audio(audio_bytes, format=audio_format)
+                st.success(f"Playing '{selected_preloaded_audio}' from repository. Format: {audio_format}")
             except Exception as e:
                 st.error(f"Error loading audio file '{selected_preloaded_audio}': {e}")
                 selected_preloaded_audio = None # Reset if error
@@ -67,13 +70,21 @@ if selection_method == "Select from existing files":
             st.info("Please select an audio file to play.")
     else:
         st.warning("No audio files found in the 'data/audio_files' directory. Please upload one.")
-        selection_method = "Upload new audio file" # Force upload if no existing files
+        # If no files exist, automatically switch to upload method
+        st.session_state['selection_method'] = "Upload new audio file" # Use session_state to persist choice
+        st.experimental_rerun() # Rerun to update the radio button state
 
 if selection_method == "Upload new audio file":
     uploaded_file_object = st.file_uploader("Upload a new audio file...", type=["mp3", "wav", "ogg"])
     if uploaded_file_object is not None:
-        st.audio(uploaded_file_object.read(), format=f'audio/{os.path.splitext(uploaded_file_object.name)[1].lstrip(".")}')
-        st.success(f"New audio file '{uploaded_file_object.name}' uploaded.")
+        # Get the file extension for correct MIME type
+        file_extension = os.path.splitext(uploaded_file_object.name)[1].lower()
+        audio_format = f"audio/{file_extension.lstrip('.')}"
+        
+        # Reset file pointer to the beginning before playing
+        uploaded_file_object.seek(0) 
+        st.audio(uploaded_file_object.read(), format=audio_format)
+        st.success(f"New audio file '{uploaded_file_object.name}' uploaded and playing. Format: {audio_format}")
     else:
         st.info("Upload a new audio file or select from existing to proceed.")
 
@@ -86,11 +97,14 @@ elif uploaded_file_object is not None:
     # For uploaded files, generate a unique ID for storage (as before)
     unique_id = uuid.uuid4().hex
     original_filename, file_extension = os.path.splitext(uploaded_file_object.name)
+    # Ensure file_extension includes the dot for consistency with unique_id generation logic
+    if not file_extension.startswith('.'):
+        file_extension = '.' + file_extension
     active_audio_identifier = f"{unique_id}_{original_filename}{file_extension}"
+    
     # Save the uploaded file to the repo's audio_files directory
     audio_save_path = os.path.join(AUDIO_DIR, active_audio_identifier)
-    # Reset file pointer before saving, as st.audio might have read it
-    uploaded_file_object.seek(0)
+    uploaded_file_object.seek(0) # Reset file pointer before saving
     with open(audio_save_path, "wb") as f:
         f.write(uploaded_file_object.getbuffer())
     st.success(f"New audio file saved to repository as '{active_audio_identifier}' for future selection.")
