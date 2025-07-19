@@ -43,9 +43,25 @@ st.set_page_config(
 st.title("🎧 Emotion Annotation and Fleiss' Kappa Calculator")
 st.write("Select an audio file, choose up to three emotions, an intensity level, and a confidence score. Fleiss' Kappa will be calculated for the **primary emotion** when enough ratings are gathered.")
 
+# --- Initialize session state for widgets if not already set ---
+# This ensures that when the app first runs, or after a submission,
+# the default values for the widgets are correctly set *before* they are rendered.
+if 'rater_id' not in st.session_state:
+    st.session_state['rater_id'] = os.getenv("STREAMLIT_USER", "Anonymous_Rater")
+if 'selection_method' not in st.session_state:
+    st.session_state['selection_method'] = "Select from existing files"
+if 'preloaded_audio_select' not in st.session_state:
+    st.session_state['preloaded_audio_select'] = "-- Select an audio file --"
+if 'emotion_multiselect' not in st.session_state:
+    st.session_state['emotion_multiselect'] = []
+if 'intensity_select' not in st.session_state:
+    st.session_state['intensity_select'] = list(INTENSITY_LEVELS.keys())[0]
+if 'confidence_select' not in st.session_state:
+    st.session_state['confidence_select'] = list(CONFIDENCE_SCORES.keys())[0]
+
 # --- Rater ID Input ---
-rater_id = st.text_input("Enter your Rater ID (e.g., Rater_A, Rater_B):", value=st.session_state.get('rater_id', os.getenv("STREAMLIT_USER", "Anonymous_Rater")))
-st.session_state['rater_id'] = rater_id # Persist rater_id
+rater_id = st.text_input("Enter your Rater ID (e.g., Rater_A, Rater_B):", value=st.session_state['rater_id'], key='rater_id_input')
+st.session_state['rater_id'] = rater_id # Update session state if user changes input
 st.info(f"Current Rater ID: **{rater_id}**")
 
 st.markdown("---")
@@ -60,11 +76,7 @@ existing_audio_files.sort()
 selected_preloaded_audio = None
 uploaded_file_object = None
 
-# Use session state to manage radio button persistence
-if 'selection_method' not in st.session_state:
-    st.session_state['selection_method'] = "Select from existing files" # Default
-
-selection_method = st.radio("Choose audio source:", ("Select from existing files", "Upload new audio file"), key='selection_method_radio')
+selection_method = st.radio("Choose audio source:", ("Select from existing files", "Upload new audio file"), key='selection_method')
 
 if selection_method == "Select from existing files":
     if existing_audio_files:
@@ -124,8 +136,9 @@ st.header("Emotion Selection")
 selected_emotions = st.multiselect(
     "Select up to three primary emotions for the audio:",
     EMOTION_LABELS,
-    max_selections=3, # Limit to 3 selections
-    key='emotion_multiselect'
+    max_selections=3,
+    key='emotion_multiselect',
+    default=st.session_state['emotion_multiselect'] # Use session state for default value
 )
 if len(selected_emotions) > 0:
     st.write(f"You have selected: **{', '.join(selected_emotions)}**")
@@ -134,12 +147,12 @@ else:
 
 # --- Intensity Level ---
 st.header("Intensity Level")
-# Using a selectbox for cleaner display, but st.radio is also an option
 selected_intensity_value = st.selectbox(
     "Select the intensity level:",
     options=list(INTENSITY_LEVELS.keys()),
-    format_func=lambda x: f"{x} ({INTENSITY_LEVELS[x]})", # Show "1 (Low)" etc.
-    key='intensity_select'
+    format_func=lambda x: f"{x} ({INTENSITY_LEVELS[x]})",
+    key='intensity_select',
+    index=list(INTENSITY_LEVELS.keys()).index(st.session_state['intensity_select']) # Use session state for index
 )
 st.write(f"Selected Intensity: **{selected_intensity_value} ({INTENSITY_LEVELS[selected_intensity_value]})**")
 
@@ -148,8 +161,9 @@ st.header("Confidence Score")
 selected_confidence_value = st.selectbox(
     "How confident are you in your rating?",
     options=list(CONFIDENCE_SCORES.keys()),
-    format_func=lambda x: f"{x} ({CONFIDENCE_SCORES[x]})", # Show "1 (Not at all Confident)" etc.
-    key='confidence_select'
+    format_func=lambda x: f"{x} ({CONFIDENCE_SCORES[x]})",
+    key='confidence_select',
+    index=list(CONFIDENCE_SCORES.keys()).index(st.session_state['confidence_select']) # Use session state for index
 )
 st.write(f"Selected Confidence: **{selected_confidence_value} ({CONFIDENCE_SCORES[selected_confidence_value]})**")
 
@@ -157,7 +171,8 @@ st.markdown("---")
 
 # --- Save Rating ---
 if active_audio_identifier and len(selected_emotions) > 0:
-    if st.button("Submit Rating"):
+    # Define a callback function to handle submission and clear inputs
+    def submit_rating():
         try:
             ratings_df = pd.read_csv(RATINGS_FILE)
         except pd.errors.EmptyDataError:
@@ -178,27 +193,25 @@ if active_audio_identifier and len(selected_emotions) > 0:
         new_rating_data = pd.DataFrame([{
             "timestamp": datetime.datetime.now().isoformat(),
             "audio_filename": active_audio_identifier,
-            "rater_id": rater_id,
+            "rater_id": st.session_state['rater_id'], # Use session_state for current rater_id
             "emotion_1": emotions_to_save[0],
             "emotion_2": emotions_to_save[1],
             "emotion_3": emotions_to_save[2],
-            "intensity_level": selected_intensity_value,
-            "confidence_score": selected_confidence_value
+            "intensity_level": st.session_state['intensity_select'], # Use session_state values at time of click
+            "confidence_score": st.session_state['confidence_select'] # Use session_state values at time of click
         }])
 
         updated_ratings_df = pd.concat([ratings_df, new_rating_data], ignore_index=True)
         updated_ratings_df.to_csv(RATINGS_FILE, index=False)
-        st.success(f"Your rating for '{active_audio_identifier}' (Emotions: {', '.join(selected_emotions)}, Intensity: {selected_intensity_value}, Confidence: {selected_confidence_value}) has been saved!")
-        
-        # Optional: Clear inputs after submission for next rating
-        # This requires using Streamlit's key system and session state
+        st.success(f"Your rating for '{active_audio_identifier}' (Emotions: {', '.join(selected_emotions)}, Intensity: {st.session_state['intensity_select']}, Confidence: {st.session_state['confidence_select']}) has been saved!")
+
+        # Clear inputs for next rating by updating session_state
         st.session_state['emotion_multiselect'] = []
-        st.session_state['intensity_select'] = list(INTENSITY_LEVELS.keys())[0] # Reset to default
-        st.session_state['confidence_select'] = list(CONFIDENCE_SCORES.keys())[0] # Reset to default
-        # If pre-loaded was selected, reset to first option or "-- Select an audio file --"
-        if selected_preloaded_audio and selected_preloaded_audio != "-- Select an audio file --":
-            st.session_state['preloaded_audio_select'] = "-- Select an audio file --"
-        st.experimental_rerun() # Rerun to show cleared inputs and updated data
+        st.session_state['intensity_select'] = list(INTENSITY_LEVELS.keys())[0]
+        st.session_state['confidence_select'] = list(CONFIDENCE_SCORES.keys())[0]
+        st.session_state['preloaded_audio_select'] = "-- Select an audio file --" # Clear selected audio
+
+    st.button("Submit Rating", on_click=submit_rating) # Call the callback when button is clicked
 else:
     st.warning("Please select or upload an audio file AND select at least one emotion before submitting your rating.")
 
@@ -227,18 +240,14 @@ if not all_ratings.empty:
 
     fleiss_kappa_results_df = pd.DataFrame()
 
-    # Re-map EMOTION_LABELS for the Kappa calculation to ensure all possible categories are considered
-    kappa_emotion_labels = sorted(list(set(EMOTION_LABELS))) # Ensure consistent order and unique labels
+    kappa_emotion_labels = sorted(list(set(EMOTION_LABELS)))
 
     for audio_id, group in grouped_by_audio_for_kappa:
-        # Count unique raters who provided an emotion_1 for this audio_id
         num_raters_for_audio = group["rater_id"].nunique()
         
         if num_raters_for_audio >= 2:
             st.markdown(f"**Soundbite ID: `{audio_id}` (Raters for Emotion 1: {num_raters_for_audio})**")
 
-            # Count occurrences of each emotion_1 for this specific audio_id
-            # Use all possible EMOTION_LABELS to ensure correct matrix size for fleiss_kappa
             emotion_1_counts = group['emotion_1'].value_counts().reindex(kappa_emotion_labels, fill_value=0)
 
             ratings_matrix_for_audio = emotion_1_counts.values.reshape(1, -1)
@@ -280,6 +289,7 @@ if not all_ratings.empty:
         st.info("No soundbites have enough ratings for 'Emotion 1' to calculate Fleiss' Kappa yet.")
 else:
     st.info("No ratings available yet. Submit some ratings to see the Fleiss' Kappa calculation.")
+
 
 st.markdown("---")
 st.caption("Developed for IAAIR Summer 2025 Research Fellowship. Created by Amy Russ: Email: aruss5@vols.utk.edu")
