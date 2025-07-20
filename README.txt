@@ -13,7 +13,7 @@ This supplementary material provides the source code for a Streamlit web applica
 The app is designed to be easily deployable on Streamlit Cloud directly from a GitHub repository, enabling collaborative annotation efforts.
 
 Size:
-The total size of the supplementary material (source code, initial data files, and this README) is approximately [CALCULATE ACTUAL SIZE HERE - e.g., 50 KB without audio, more with sample audio]. This does not include any audio files that users might upload during live application use, as those are stored ephemerally.
+The total size of the supplementary material (source code, initial data files, and this README) is approximately 4.66MB with sample audio (a total of 31 files). This does not include any audio files that users might upload during live application use, as those are stored ephemerally. The sample audio files are from the CREMA-D corpus located here: https://github.com/CheyneyComputerScience/CREMA-D/tree/master (full citation in paper: "The Empathetic Machine: The Introduction of Emotional Intelligence Recognition in Conversational AI"). 
 
 Player Information:
 The primary component is a web application built with Streamlit.
