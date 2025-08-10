@@ -102,7 +102,7 @@ class ModelConfig:
     max_audio_length: int = 16000 * 30  # 30 seconds at 16kHz
     hidden_size: int = 768
     audio_hidden_size: int = 1024  # Wav2Vec2 hidden size
-    num_attention_heads: int = 12
+    num_attention_heads: int = 14
     num_hidden_layers: int = 6
     dropout_rate: float = 0.1
     learning_rate: float = 2e-5
@@ -685,14 +685,14 @@ class EmotionalIntelligenceModel(nn.Module):
 
       # Multimodal fusion layer
       self.fusion_layer = nn.Sequential(
-            nn.Linear(config.hidden_size * 2, config.hidden_size),
+            nn.Linear(1792, config.hidden_size),
             nn.ReLU(),
             nn.Dropout(config.dropout_rate)
         )
 
       # Emotion classification head (enhanced with audio)
       self.emotion_classifier = nn.Sequential(
-            nn.Linear(config.hidden_size, config.hidden_size // 2),
+            nn.Linear(1792, config.hidden_size // 2),
             nn.ReLU(),
             nn.Dropout(config.dropout_rate),
             nn.Linear(config.hidden_size // 2, len(config.emotion_classes))
