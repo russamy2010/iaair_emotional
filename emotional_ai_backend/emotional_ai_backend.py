@@ -100,9 +100,9 @@ class ModelConfig:
     emotion_classes: List[str] = None
     max_sequence_length: int = 512
     max_audio_length: int = 16000 * 30  # 30 seconds at 16kHz
-    hidden_size: int = 768
+    hidden_size: int = 1024 # DialoGPT-medium has 1024 size
     audio_hidden_size: int = 1024  # Wav2Vec2 hidden size
-    num_attention_heads: int = 14
+    num_attention_heads: int = 16
     num_hidden_layers: int = 6
     dropout_rate: float = 0.1
     learning_rate: float = 2e-5
@@ -111,7 +111,7 @@ class ModelConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     sample_rate: int = 16000
 
-    # Gradient accumulation
+     # Gradient accumulation
     gradient_accumulation_steps: int = 4  # New parameter for gradient accumulation
 
     # Dataset paths
@@ -673,26 +673,36 @@ class EmotionalIntelligenceModel(nn.Module):
       super().__init__()
       self.config = config
 
-      # Load pre-trained transformer
+     # Load pre-trained transformer
       self.tokenizer = AutoTokenizer.from_pretrained(config.base_model)
       if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
+          self.tokenizer.pad_token = self.tokenizer.eos_token
+          
+      self.transformer = AutoModel.from_pretrained(config.base_model)
+     
+     # Get the actual hidden size from the loaded model
+      actual_hidden_size = self.transformer.config.hidden_size
+      print(f"Actual model hidden size: {actual_hidden_size}")
+      
+     # Update config if needed
+      if actual_hidden_size != config.hidden_size:
+            print(f"Warning: Config hidden_size ({config.hidden_size}) != actual hidden_size ({actual_hidden_size})")
+            print(f"Using actual hidden_size: {actual_hidden_size}")
+            config.hidden_size = actual_hidden_size
+            
+     # Audio feature projection layer
+      self.audio_projection = nn.Linear(config.audio_hidden_size, config.hidden_size)
 
-            self.transformer = AutoModel.from_pretrained(config.base_model)
-
-      # Audio feature projection layer
-            self.audio_projection = nn.Linear(config.audio_hidden_size, config.hidden_size)
-
-      # Multimodal fusion layer
+     # Multimodal fusion layer
       self.fusion_layer = nn.Sequential(
-            nn.Linear(1792, config.hidden_size),
+            nn.Linear(config.hidden_size * 2, config.hidden_size),
             nn.ReLU(),
             nn.Dropout(config.dropout_rate)
         )
 
       # Emotion classification head (enhanced with audio)
       self.emotion_classifier = nn.Sequential(
-            nn.Linear(1792, config.hidden_size // 2),
+            nn.Linear(config.hidden_size, config.hidden_size // 2),
             nn.ReLU(),
             nn.Dropout(config.dropout_rate),
             nn.Linear(config.hidden_size // 2, len(config.emotion_classes))
@@ -761,6 +771,7 @@ class EmotionalIntelligenceModel(nn.Module):
             outputs['response_logits'] = response_logits
 
         return outputs
+    
 
     def generate_response(self, input_text: str, audio_features: torch.Tensor = None,
                          max_length: int = 100, temperature: float = 0.7):
@@ -877,6 +888,7 @@ class EmotionalAITrainer: # Updated EmotionalAITrainer class with gradient accum
         total_loss = 0
         emotion_correct = 0
         total_samples = 0
+        
         # Initialize gradient accumulation
         accumulation_steps = self.config.gradient_accumulation_steps
         accumulation_counter = 0
@@ -885,25 +897,11 @@ class EmotionalAITrainer: # Updated EmotionalAITrainer class with gradient accum
         effective_batch_size = self.config.batch_size * accumulation_steps
         logger.info(f"Training with gradient accumulation: {accumulation_steps} steps, "
                    f"effective batch size: {effective_batch_size}")
+        
+        # Zero gradients at the start
+        self.optimizer.zero_grad()
 
         for batch_idx, batch in enumerate(dataloader):
-            # Move batch to device
-            input_ids = batch['input_ids'].to(self.config.device)
-            attention_mask = batch['attention_mask'].to(self.config.device)
-            response_ids = batch['response_ids'].to(self.config.device)
-            emotion_labels = batch['emotion_label'].to(self.config.device)
-            audio_features = batch['audio_features'].to(self.config.device)
-
-            # Forward pass
-            outputs = self.model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                audio_features=audio_features,
-                response_ids=response_ids,
-                training=True
-            )
-
-        for batch in dataloader:
             # Move batch to device
             input_ids = batch['input_ids'].to(self.config.device)
             attention_mask = batch['attention_mask'].to(self.config.device)
@@ -932,6 +930,7 @@ class EmotionalAITrainer: # Updated EmotionalAITrainer class with gradient accum
                 total_loss_batch = emotion_loss + response_loss
             else:
                 total_loss_batch = emotion_loss
+                
             # Scale loss by accumulation steps
             scaled_loss = total_loss_batch / accumulation_steps
             
@@ -956,11 +955,6 @@ class EmotionalAITrainer: # Updated EmotionalAITrainer class with gradient accum
                 # Reset accumulation counter if not end of epoch
                 if not is_last_batch:
                     accumulation_counter = 0
-
-            # Backward pass
-            self.optimizer.zero_grad()
-            total_loss_batch.backward()
-            self.optimizer.step()
 
             # Track metrics (use original unscaled loss for tracking)
             total_loss += total_loss_batch.item()
