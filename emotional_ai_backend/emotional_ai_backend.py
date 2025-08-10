@@ -132,11 +132,11 @@ class DatasetDownloader:
     def __init__(self, config: ModelConfig):
         self.config = config
         self.crema_d_path = Path(config.crema_d_path)
-        self.omg_emotion_path = Path(config.omg_emotion_path)
+        self.jl_corpus_path = Path(config.crema_d_path).parent
 
         # Create dataset directories
         self.crema_d_path.mkdir(parents=True, exist_ok=True)
-        self.omg_emotion_path.mkdir(parents=True, exist_ok=True)
+        self.jl_corpus_path.mkdir(parents=True, exist_ok=True)
 
         # Emotion mapping dictionaries
         self.crema_d_emotion_map = {
@@ -148,12 +148,19 @@ class DatasetDownloader:
             'SAD': 'Sadness'
         }
 
-        self.omg_emotion_map = {
+         # JL-Corpus emotion mapping (based on the dataset description)
+        self.jl_corpus_emotion_map = {
+            'angry': 'Anger',
+            'disgusted': 'Disgust',
+            'fearful': 'Fear',
+            'happy': 'Joy',
+            'neutral': 'Neutral',
+            'sad': 'Sadness',
+            'surprised': 'Surprise',
             'anger': 'Anger',
             'disgust': 'Disgust',
             'fear': 'Fear',
-            'joy': 'Joy',
-            'neutral': 'Neutral',
+            'happiness': 'Joy',
             'sadness': 'Sadness',
             'surprise': 'Surprise'
         }
@@ -191,101 +198,51 @@ class DatasetDownloader:
             logger.error(f"Error downloading CREMA-D dataset: {str(e)}")
             return False
 
-    def download_omg_emotion(self) -> bool:
-        """Download OMG Emotion Challenge dataset"""
-        if not YOUTUBE_DL_AVAILABLE or youtube_dl is None:
-            logger.warning("⚠️ YouTube-dl not available - OMG Emotion download skipped")
+  def download_jl_corpus(self) -> bool:
+        """Download JL-Corpus dataset using kagglehub"""
+        if not KAGGLEHUB_AVAILABLE or kagglehub is None:
+            logger.warning("⚠️ Kagglehub not available - JL-Corpus download skipped")
             return False
 
         try:
-            logger.info("Setting up OMG Emotion Challenge dataset...")
+            logger.info("Downloading JL-Corpus dataset...")
 
-            # Clone the repository
-            repo_url = "https://github.com/knowledgetechnologyuhh/OMGEmotionChallenge.git"
-            repo_path = self.omg_emotion_path / "OMGEmotionChallenge"
+            # Download using kagglehub
+            path = kagglehub.dataset_download("tli725/jl-corpus")
+            logger.info(f"JL-Corpus dataset downloaded to: {path}")
 
-            if not repo_path.exists():
-                subprocess.run([
-                    "git", "clone", repo_url, str(repo_path)
-                ], check=True)
-                logger.info("OMG Emotion Challenge repository cloned")
+            # Copy/move files to our designated path
+            import shutil
+            source_path = Path(path)
 
-            # Install requirements
-            requirements_path = repo_path / "requirements.txt"
-            if requirements_path.exists():
-                subprocess.run([
-                    "pip", "install", "-r", str(requirements_path)
-                ], check=True)
-                logger.info("OMG requirements installed")
+            # Find all files and copy them
+            all_files = list(source_path.glob("**/*"))
+            audio_files = [f for f in all_files if f.suffix.lower() in ['.wav', '.mp3', '.flac', '.m4a']]
+            csv_files = [f for f in all_files if f.suffix.lower() == '.csv']
+            
+            logger.info(f"Found {len(audio_files)} audio files and {len(csv_files)} CSV files in JL-Corpus dataset")
 
-            # Process the train folder annotations
-            train_annotations_path = repo_path / "DetailedAnnotation" / "train"
+            # Copy audio files
+            audio_dest = self.jl_corpus_path / "audio"
+            audio_dest.mkdir(exist_ok=True)
+            
+            for audio_file in audio_files:
+                dest_file = audio_dest / audio_file.name
+                if not dest_file.exists():
+                    shutil.copy2(audio_file, dest_file)
 
-            if train_annotations_path.exists():
-                # Download videos based on annotations
-                self._download_omg_videos(train_annotations_path)
-                logger.info("OMG Emotion dataset setup complete")
-                return True
-            else:
-                logger.error("OMG train annotations not found")
-                return False
+            # Copy CSV files (labels/metadata)
+            for csv_file in csv_files:
+                dest_file = self.jl_corpus_path / csv_file.name
+                if not dest_file.exists():
+                    shutil.copy2(csv_file, dest_file)
+
+            logger.info(f"JL-Corpus dataset setup complete: {len(audio_files)} audio files, {len(csv_files)} CSV files")
+            return True
 
         except Exception as e:
-            logger.error(f"Error setting up OMG Emotion dataset: {str(e)}")
+            logger.error(f"Error downloading JL-Corpus dataset: {str(e)}")
             return False
-
-    def _download_omg_videos(self, annotations_path: Path):
-        """Download YouTube videos for OMG dataset"""
-        if not YOUTUBE_DL_AVAILABLE or youtube_dl is None:
-            logger.warning("⚠️ YouTube-dl not available - video download skipped")
-            return
-
-        try:
-            # Find all annotation files
-            annotation_files = list(annotations_path.glob("*.csv"))
-            logger.info(f"Found {len(annotation_files)} annotation files")
-
-            # YouTube downloader configuration
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': str(self.omg_emotion_path / 'videos' / '%(id)s.%(ext)s'),
-                'extractaudio': True,
-                'audioformat': 'wav',
-                'audioquality': '192K',
-            }
-
-            video_urls = set()
-
-            # Extract video URLs from annotation files
-            for ann_file in annotation_files:
-                try:
-                    df = pd.read_csv(ann_file)
-                    if 'link' in df.columns:
-                        urls = df['link'].dropna().unique()
-                        video_urls.update(urls)
-                except Exception as e:
-                    logger.warning(f"Could not process {ann_file}: {str(e)}")
-
-            logger.info(f"Found {len(video_urls)} unique video URLs")
-
-            # Download videos (limit to reasonable number for demo)
-            download_limit = min(50, len(video_urls))  # Limit for demo purposes
-            downloaded_count = 0
-
-            with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-                for i, url in enumerate(list(video_urls)[:download_limit]):
-                    try:
-                        ydl.download([url])
-                        downloaded_count += 1
-                        logger.info(f"Downloaded video {i+1}/{download_limit}")
-                    except Exception as e:
-                        logger.warning(f"Failed to download {url}: {str(e)}")
-                        continue
-
-            logger.info(f"Successfully downloaded {downloaded_count} videos")
-
-        except Exception as e:
-            logger.error(f"Error downloading OMG videos: {str(e)}")
 
     def process_crema_d_data(self) -> List[Dict]:
         """Process CREMA-D dataset into training format"""
@@ -337,126 +294,209 @@ class DatasetDownloader:
             logger.error(f"Error processing CREMA-D data: {str(e)}")
             return []
 
-    def process_omg_emotion_data(self) -> List[Dict]:
-        """Process OMG Emotion Challenge dataset"""
+   def process_jl_corpus_data(self) -> List[Dict]:
+        """Process JL-Corpus dataset into training format"""
         try:
-            repo_path = self.omg_emotion_path / "OMGEmotionChallenge"
-            train_annotations_path = repo_path / "DetailedAnnotation" / "train"
-            videos_path = self.omg_emotion_path / "videos"
-
+            audio_dir = self.jl_corpus_path / "audio"
             processed_data = []
 
-            # Process annotation files
-            annotation_files = list(train_annotations_path.glob("*.csv"))
-            logger.info(f"Processing {len(annotation_files)} OMG annotation files...")
+            # Look for CSV files with labels/metadata
+            csv_files = list(self.jl_corpus_path.glob("*.csv"))
+            
+            if csv_files:
+                # Process using CSV metadata
+                logger.info(f"Processing JL-Corpus with {len(csv_files)} CSV files...")
+                
+                for csv_file in csv_files:
+                    try:
+                        df = pd.read_csv(csv_file)
+                        logger.info(f"CSV columns: {df.columns.tolist()}")
+                        
+                        for _, row in tqdm(df.iterrows(), desc=f"Processing {csv_file.name}", total=len(df)):
+                            try:
+                                # Try to extract emotion and filename from different possible column names
+                                emotion = None
+                                audio_filename = None
+                                utterance = ""
+                                
+                                # Common column name variations for emotion
+                                emotion_cols = ['emotion', 'label', 'sentiment', 'feeling', 'class']
+                                for col in emotion_cols:
+                                    if col in df.columns:
+                                        emotion_raw = str(row[col]).lower().strip()
+                                        emotion = self.jl_corpus_emotion_map.get(emotion_raw, emotion_raw.title())
+                                        break
+                                
+                                # Common column name variations for filename
+                                filename_cols = ['filename', 'file', 'audio_file', 'path', 'wav_file']
+                                for col in filename_cols:
+                                    if col in df.columns:
+                                        audio_filename = str(row[col])
+                                        break
+                                
+                                # Common column name variations for text/utterance
+                                text_cols = ['text', 'utterance', 'transcript', 'sentence', 'content']
+                                for col in text_cols:
+                                    if col in df.columns and pd.notna(row[col]):
+                                        utterance = str(row[col])
+                                        break
+                                
+                                if not emotion:
+                                    # Fallback: try to infer emotion from filename
+                                    if audio_filename:
+                                        filename_lower = audio_filename.lower()
+                                        for emotion_key, emotion_value in self.jl_corpus_emotion_map.items():
+                                            if emotion_key in filename_lower:
+                                                emotion = emotion_value
+                                                break
+                                    
+                                    if not emotion:
+                                        emotion = 'Neutral'
+                                
+                                if not audio_filename:
+                                    # Skip if we can't find audio filename
+                                    continue
+                                
+                                # Try to find the actual audio file
+                                audio_file_path = None
+                                if audio_dir.exists():
+                                    # Try exact match first
+                                    potential_path = audio_dir / audio_filename
+                                    if potential_path.exists():
+                                        audio_file_path = potential_path
+                                    else:
+                                        # Try with different extensions
+                                        base_name = Path(audio_filename).stem
+                                        for ext in ['.wav', '.mp3', '.flac', '.m4a']:
+                                            potential_path = audio_dir / f"{base_name}{ext}"
+                                            if potential_path.exists():
+                                                audio_file_path = potential_path
+                                                break
+                                
+                                # Create training sample
+                                if not utterance:
+                                    utterance = f"[Audio expression of {emotion.lower()}]"
+                                
+                                processed_data.append({
+                                    'id': str(uuid.uuid4()),
+                                    'audio_file': str(audio_file_path) if audio_file_path else None,
+                                    'user_message': utterance,
+                                    'response': f"I understand you're expressing {emotion.lower()}. That's a valid feeling.",
+                                    'context': "JL-Corpus conversation context",
+                                    'emotion': emotion,
+                                    'audio_features': None,  # Will be processed later if audio exists
+                                    'dataset_source': 'jl_corpus',
+                                    'timestamp': datetime.datetime.now().isoformat()
+                                })
 
-            for ann_file in tqdm(annotation_files, desc="Processing OMG Emotion"):
-                try:
-                    df = pd.read_csv(ann_file)
-
-                    for _, row in df.iterrows():
+                            except Exception as e:
+                                logger.warning(f"Error processing row in {csv_file}: {str(e)}")
+                                continue
+                                
+                    except Exception as e:
+                        logger.warning(f"Error processing CSV file {csv_file}: {str(e)}")
+                        continue
+            
+            else:
+                # Fallback: Process audio files directly if no CSV found
+                logger.info("No CSV files found, processing audio files directly...")
+                
+                if audio_dir.exists():
+                    audio_files = list(audio_dir.glob("*"))
+                    audio_files = [f for f in audio_files if f.suffix.lower() in ['.wav', '.mp3', '.flac', '.m4a']]
+                    
+                    for audio_file in tqdm(audio_files, desc="Processing JL-Corpus audio"):
                         try:
-                            # Extract emotion information
-                            emotion_cols = ['anger', 'disgust', 'fear', 'joy', 'neutral', 'sadness', 'surprise']
-                            emotion_scores = {col: row.get(col, 0) for col in emotion_cols if col in df.columns}
-
-                            # Find dominant emotion
-                            if emotion_scores:
-                                dominant_emotion = max(emotion_scores.keys(), key=lambda x: emotion_scores[x])
-                                emotion = self.omg_emotion_map.get(dominant_emotion, 'Neutral')
-                            else:
-                                emotion = 'Neutral'
-
-                            # Generate conversation context
-                            utterance = row.get('utterance', f"[Emotional expression: {emotion}]")
-
-                            # Try to find corresponding video file
-                            video_id = row.get('video_id', '')
-                            audio_file = None
-
-                            if video_id and videos_path.exists():
-                                possible_files = list(videos_path.glob(f"*{video_id}*"))
-                                if possible_files:
-                                    audio_file = str(possible_files[0])
-
+                            # Try to infer emotion from filename
+                            filename_lower = audio_file.name.lower()
+                            emotion = 'Neutral'
+                            
+                            for emotion_key, emotion_value in self.jl_corpus_emotion_map.items():
+                                if emotion_key in filename_lower:
+                                    emotion = emotion_value
+                                    break
+                            
                             processed_data.append({
                                 'id': str(uuid.uuid4()),
-                                'audio_file': audio_file,
-                                'user_message': utterance,
+                                'audio_file': str(audio_file),
+                                'user_message': f"[Audio expression of {emotion.lower()}]",
                                 'response': f"I understand you're expressing {emotion.lower()}. That's a valid feeling.",
-                                'context': "Video conversation context",
+                                'context': "JL-Corpus audio context",
                                 'emotion': emotion,
-                                'audio_features': None,  # Will be processed later if audio exists
-                                'dataset_source': 'omg_emotion',
-                                'emotion_scores': emotion_scores,
+                                'audio_features': None,
+                                'dataset_source': 'jl_corpus',
                                 'timestamp': datetime.datetime.now().isoformat()
                             })
-
+                            
                         except Exception as e:
-                            logger.warning(f"Error processing row in {ann_file}: {str(e)}")
+                            logger.warning(f"Error processing {audio_file}: {str(e)}")
                             continue
 
-                except Exception as e:
-                    logger.warning(f"Error processing {ann_file}: {str(e)}")
-                    continue
-
-            logger.info(f"Successfully processed {len(processed_data)} OMG Emotion samples")
+            logger.info(f"Successfully processed {len(processed_data)} JL-Corpus samples")
             return processed_data
 
         except Exception as e:
-            logger.error(f"Error processing OMG Emotion data: {str(e)}")
+            logger.error(f"Error processing JL-Corpus data: {str(e)}")
             return []
 
     def create_train_test_val_split(self) -> Tuple[List[Dict], List[Dict], List[Dict]]:
         """
         Create train/test/val split according to specifications:
-        - 70% training: All CREMA-D + 20% of OMG
-        - 20% test: Only from OMG (remaining data)
-        - 10% validation: Only from OMG (remaining data)
+        - 70% training: All CREMA-D + 20% from JL-Corpus
+        - 20% test: Only from JL-Corpus (remaining data)
+        - 10% validation: Only from JL-Corpus (remaining data)
         """
         try:
             logger.info("Creating train/test/validation split...")
 
             # Get all datasets
             crema_d_data = self.process_crema_d_data()
-            omg_data = self.process_omg_emotion_data()
+            jl_corpus_data = self.process_jl_corpus_data()
 
             logger.info(f"CREMA-D samples: {len(crema_d_data)}")
-            logger.info(f"OMG Emotion samples: {len(omg_data)}")
+            logger.info(f"JL-Corpus samples: {len(jl_corpus_data)}")
 
-            # Split OMG data: 20% for training, 80% for test/val
-            omg_train_size = int(0.20 * len(omg_data))
-            omg_remaining = len(omg_data) - omg_train_size
+            # Split JL-Corpus data: 20% for training, 80% for test/val
+            jl_train_size = int(0.20 * len(jl_corpus_data))
+            jl_remaining = len(jl_corpus_data) - jl_train_size
 
-            # From remaining OMG: 2/3 for test (20%), 1/3 for val (10%)
-            omg_test_size = int((2/3) * omg_remaining)
-            omg_val_size = omg_remaining - omg_test_size
+           # From remaining JL-Corpus: 2/3 for test (20%), 1/3 for val (10%)
+                jl_test_size = int((2/3) * jl_remaining)
+                jl_val_size = jl_remaining - jl_test_size
+            
+           # Ensure minimum sizes for JL-Corpus splits
+                if jl_val_size == 0 and jl_remaining > 0:
+                    jl_test_size -= 1
+                    jl_val_size = 1
+            
+          # Split JL-Corpus data
+          jl_shuffled = jl_corpus_data.copy()
+          np.random.shuffle(jl_shuffled)
 
-            # Split OMG data
-            omg_shuffled = omg_data.copy()
-            np.random.shuffle(omg_shuffled)
-
-            omg_for_training = omg_shuffled[:omg_train_size]
-            omg_for_test = omg_shuffled[omg_train_size:omg_train_size + omg_test_size]
-            omg_for_val = omg_shuffled[omg_train_size + omg_test_size:]
+             jl_for_training = jl_shuffled[:jl_train_size]
+             jl_for_test = jl_shuffled[jl_train_size:jl_train_size + jl_test_size]
+             jl_for_val = jl_shuffled[jl_train_size + jl_test_size:]
 
             # Create final splits
-            train_data = crema_d_data + omg_for_training  # All CREMA-D + 20% OMG
-            test_data = omg_for_test  # 20% of total from OMG only
-            val_data = omg_for_val    # 10% of total from OMG only
+            train_data = crema_d_data + jl_for_training  # All CREMA-D + 20% JL-Corpus
+            test_data = jl_for_test  # 20% of total from JL-Corpus only
+            val_data = jl_for_val    # 10% of total from JL-Corpus only
+                
+            logger.info(f"Combined dataset split created:")
+            logger.info(f"  Training: {len(train_data)} samples (All CREMA-D + {len(jl_for_training)} JL-Corpus)")
+            logger.info(f"  Test: {len(test_data)} samples (JL-Corpus only)")
+            logger.info(f"  Validation: {len(val_data)} samples (JL-Corpus only)")
 
-            # Verify splits
+            # Final summary
             total_samples = len(train_data) + len(test_data) + len(val_data)
             train_pct = len(train_data) / total_samples * 100
             test_pct = len(test_data) / total_samples * 100
             val_pct = len(val_data) / total_samples * 100
 
-            logger.info(f"Dataset split created:")
+            logger.info(f"Final dataset split:")
             logger.info(f"  Training: {len(train_data)} samples ({train_pct:.1f}%)")
-            logger.info(f"    - CREMA-D: {len(crema_d_data)} samples")
-            logger.info(f"    - OMG: {len(omg_for_training)} samples")
-            logger.info(f"  Test: {len(test_data)} samples ({test_pct:.1f}%) - OMG only")
-            logger.info(f"  Validation: {len(val_data)} samples ({val_pct:.1f}%) - OMG only")
+            logger.info(f"  Test: {len(test_data)} samples ({test_pct:.1f}%)")
+            logger.info(f"  Validation: {len(val_data)} samples ({val_pct:.1f}%)")
 
             return train_data, test_data, val_data
 
