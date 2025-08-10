@@ -120,6 +120,9 @@ class ModelConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     sample_rate: int = 16000
 
+    # Gradient accumulation
+    gradient_accumulation_steps: int = 4  # New parameter for gradient accumulation
+
     # Dataset paths
     crema_d_path: str = "./datasets/crema_d"
     omg_emotion_path: str = "./datasets/omg_emotion"
@@ -831,7 +834,7 @@ class EmotionalIntelligenceModel(nn.Module):
                 'has_audio_input': audio_features is not None
             }
 
-class EmotionalAITrainer:
+class EmotionalAITrainer: # Updated EmotionalAITrainer class with gradient accumulation
     """Training pipeline for the emotional intelligence model with integrated datasets"""
 
     def __init__(self, config: ModelConfig):
@@ -883,6 +886,31 @@ class EmotionalAITrainer:
         total_loss = 0
         emotion_correct = 0
         total_samples = 0
+        # Initialize gradient accumulation
+        accumulation_steps = self.config.gradient_accumulation_steps
+        accumulation_counter = 0
+        
+        # Calculate effective batch size
+        effective_batch_size = self.config.batch_size * accumulation_steps
+        logger.info(f"Training with gradient accumulation: {accumulation_steps} steps, "
+                   f"effective batch size: {effective_batch_size}")
+
+        for batch_idx, batch in enumerate(dataloader):
+            # Move batch to device
+            input_ids = batch['input_ids'].to(self.config.device)
+            attention_mask = batch['attention_mask'].to(self.config.device)
+            response_ids = batch['response_ids'].to(self.config.device)
+            emotion_labels = batch['emotion_label'].to(self.config.device)
+            audio_features = batch['audio_features'].to(self.config.device)
+
+            # Forward pass
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                audio_features=audio_features,
+                response_ids=response_ids,
+                training=True
+            )
 
         for batch in dataloader:
             # Move batch to device
@@ -913,13 +941,37 @@ class EmotionalAITrainer:
                 total_loss_batch = emotion_loss + response_loss
             else:
                 total_loss_batch = emotion_loss
+            # Scale loss by accumulation steps
+            scaled_loss = total_loss_batch / accumulation_steps
+            
+            # Backward pass (accumulate gradients)
+            scaled_loss.backward()
+            
+            # Update accumulation counter
+            accumulation_counter += 1
+            
+            # Check if we should update parameters
+            is_last_batch = (batch_idx + 1) == len(dataloader)
+            should_update = (accumulation_counter % accumulation_steps == 0) or is_last_batch
+            
+            if should_update:
+                # Gradient clipping (optional, but recommended)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                
+                # Update parameters
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+                
+                # Reset accumulation counter if not end of epoch
+                if not is_last_batch:
+                    accumulation_counter = 0
 
             # Backward pass
             self.optimizer.zero_grad()
             total_loss_batch.backward()
             self.optimizer.step()
 
-            # Track metrics
+            # Track metrics (use original unscaled loss for tracking)
             total_loss += total_loss_batch.item()
             emotion_pred = torch.argmax(outputs['emotion_logits'], dim=-1)
             emotion_correct += (emotion_pred == emotion_labels).sum().item()
