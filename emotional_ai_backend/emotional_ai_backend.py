@@ -1,7 +1,7 @@
 """
 Emotional Intelligence LLM Backend
 A neural network-based system for emotion-aware conversational AI with audio input support
-Integrated with CREMA-D and OMG Emotion Challenge datasets
+Integrated with CREMA-D and JL-Corpus datasets
 """
 
 import torch
@@ -100,7 +100,7 @@ class ModelConfig:
     emotion_classes: List[str] = None
     max_sequence_length: int = 512
     max_audio_length: int = 16000 * 30  # 30 seconds at 16kHz
-    hidden_size: int = 1024 # DialoGPT-medium has 1024 size
+    hidden_size: int = 1024  # DialoGPT-medium has 1024 size
     audio_hidden_size: int = 1024  # Wav2Vec2 hidden size
     num_attention_heads: int = 16
     num_hidden_layers: int = 6
@@ -111,12 +111,12 @@ class ModelConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     sample_rate: int = 16000
 
-     # Gradient accumulation
+    # Gradient accumulation
     gradient_accumulation_steps: int = 4  # New parameter for gradient accumulation
 
     # Dataset paths
     crema_d_path: str = "./datasets/crema_d"
-    omg_emotion_path: str = "./datasets/omg_emotion"
+    jl_corpus_path: str = "./datasets/jl_corpus"
 
     def __post_init__(self):
         if self.emotion_classes is None:
@@ -132,7 +132,7 @@ class DatasetDownloader:
     def __init__(self, config: ModelConfig):
         self.config = config
         self.crema_d_path = Path(config.crema_d_path)
-        self.jl_corpus_path = Path(config.crema_d_path).parent
+        self.jl_corpus_path = Path(config.crema_d_path).parent / "jl_corpus"
 
         # Create dataset directories
         self.crema_d_path.mkdir(parents=True, exist_ok=True)
@@ -148,7 +148,7 @@ class DatasetDownloader:
             'SAD': 'Sadness'
         }
 
-         # JL-Corpus emotion mapping (based on the dataset description)
+        # JL-Corpus emotion mapping (based on the dataset description)
         self.jl_corpus_emotion_map = {
             'angry': 'Anger',
             'disgusted': 'Disgust',
@@ -198,7 +198,7 @@ class DatasetDownloader:
             logger.error(f"Error downloading CREMA-D dataset: {str(e)}")
             return False
 
-  def download_jl_corpus(self) -> bool:
+    def download_jl_corpus(self) -> bool:
         """Download JL-Corpus dataset using kagglehub"""
         if not KAGGLEHUB_AVAILABLE or kagglehub is None:
             logger.warning("⚠️ Kagglehub not available - JL-Corpus download skipped")
@@ -294,7 +294,7 @@ class DatasetDownloader:
             logger.error(f"Error processing CREMA-D data: {str(e)}")
             return []
 
-   def process_jl_corpus_data(self) -> List[Dict]:
+    def process_jl_corpus_data(self) -> List[Dict]:
         """Process JL-Corpus dataset into training format"""
         try:
             audio_dir = self.jl_corpus_path / "audio"
@@ -456,36 +456,62 @@ class DatasetDownloader:
             logger.info(f"CREMA-D samples: {len(crema_d_data)}")
             logger.info(f"JL-Corpus samples: {len(jl_corpus_data)}")
 
-            # Split JL-Corpus data: 20% for training, 80% for test/val
-            jl_train_size = int(0.20 * len(jl_corpus_data))
-            jl_remaining = len(jl_corpus_data) - jl_train_size
+            # Check if we have JL-Corpus data
+            if len(jl_corpus_data) == 0:
+                logger.warning("No JL-Corpus data available! Splitting CREMA-D data proportionally...")
+                
+                # Shuffle CREMA-D data
+                crema_shuffled = crema_d_data.copy()
+                np.random.shuffle(crema_shuffled)
+                
+                total_crema = len(crema_shuffled)
+                train_size = int(0.7 * total_crema)
+                test_size = int(0.2 * total_crema)
+                val_size = total_crema - train_size - test_size
+                
+                # Ensure minimum sizes
+                if val_size == 0 and total_crema > 2:
+                    train_size -= 1
+                    val_size = 1
+                if test_size == 0 and total_crema > 1:
+                    train_size -= 1
+                    test_size = 1
+                
+                train_data = crema_shuffled[:train_size]
+                test_data = crema_shuffled[train_size:train_size + test_size]
+                val_data = crema_shuffled[train_size + test_size:]
+                
+            else:
+                # Split JL-Corpus data: 20% for training, 80% for test/val
+                jl_train_size = int(0.20 * len(jl_corpus_data))
+                jl_remaining = len(jl_corpus_data) - jl_train_size
 
-           # From remaining JL-Corpus: 2/3 for test (20%), 1/3 for val (10%)
+                # From remaining JL-Corpus: 2/3 for test (20%), 1/3 for val (10%)
                 jl_test_size = int((2/3) * jl_remaining)
                 jl_val_size = jl_remaining - jl_test_size
-            
-           # Ensure minimum sizes for JL-Corpus splits
+                
+                # Ensure minimum sizes for JL-Corpus splits
                 if jl_val_size == 0 and jl_remaining > 0:
                     jl_test_size -= 1
                     jl_val_size = 1
-            
-          # Split JL-Corpus data
-          jl_shuffled = jl_corpus_data.copy()
-          np.random.shuffle(jl_shuffled)
-
-             jl_for_training = jl_shuffled[:jl_train_size]
-             jl_for_test = jl_shuffled[jl_train_size:jl_train_size + jl_test_size]
-             jl_for_val = jl_shuffled[jl_train_size + jl_test_size:]
-
-            # Create final splits
-            train_data = crema_d_data + jl_for_training  # All CREMA-D + 20% JL-Corpus
-            test_data = jl_for_test  # 20% of total from JL-Corpus only
-            val_data = jl_for_val    # 10% of total from JL-Corpus only
                 
-            logger.info(f"Combined dataset split created:")
-            logger.info(f"  Training: {len(train_data)} samples (All CREMA-D + {len(jl_for_training)} JL-Corpus)")
-            logger.info(f"  Test: {len(test_data)} samples (JL-Corpus only)")
-            logger.info(f"  Validation: {len(val_data)} samples (JL-Corpus only)")
+                # Split JL-Corpus data
+                jl_shuffled = jl_corpus_data.copy()
+                np.random.shuffle(jl_shuffled)
+
+                jl_for_training = jl_shuffled[:jl_train_size]
+                jl_for_test = jl_shuffled[jl_train_size:jl_train_size + jl_test_size]
+                jl_for_val = jl_shuffled[jl_train_size + jl_test_size:]
+
+                # Create final splits
+                train_data = crema_d_data + jl_for_training  # All CREMA-D + 20% JL-Corpus
+                test_data = jl_for_test  # 20% of total from JL-Corpus only
+                val_data = jl_for_val    # 10% of total from JL-Corpus only
+                    
+                logger.info(f"Combined dataset split created:")
+                logger.info(f"  Training: {len(train_data)} samples (All CREMA-D + {len(jl_for_training)} JL-Corpus)")
+                logger.info(f"  Test: {len(test_data)} samples (JL-Corpus only)")
+                logger.info(f"  Validation: {len(val_data)} samples (JL-Corpus only)")
 
             # Final summary
             total_samples = len(train_data) + len(test_data) + len(val_data)
@@ -502,6 +528,8 @@ class DatasetDownloader:
 
         except Exception as e:
             logger.error(f"Error creating train/test/val split: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return [], [], []
 
     def setup_datasets(self) -> Tuple[List[Dict], List[Dict], List[Dict]]:
@@ -510,13 +538,13 @@ class DatasetDownloader:
 
         # Download datasets
         crema_success = self.download_crema_d()
-        omg_success = self.download_omg_emotion()
+        jl_success = self.download_jl_corpus()
 
         if not crema_success:
             logger.warning("CREMA-D download failed, continuing with available data...")
 
-        if not omg_success:
-            logger.warning("OMG Emotion download failed, continuing with available data...")
+        if not jl_success:
+            logger.warning("JL-Corpus download failed, continuing with available data...")
 
         # Create splits
         return self.create_train_test_val_split()
@@ -710,54 +738,54 @@ class EmotionalIntelligenceModel(nn.Module):
     """Neural network model for emotion-aware conversation generation with audio support"""
 
     def __init__(self, config: ModelConfig):
-      super().__init__()
-      self.config = config
+        super().__init__()
+        self.config = config
 
-     # Load pre-trained transformer
-      self.tokenizer = AutoTokenizer.from_pretrained(config.base_model)
-      if self.tokenizer.pad_token is None:
-          self.tokenizer.pad_token = self.tokenizer.eos_token
-          
-      self.transformer = AutoModel.from_pretrained(config.base_model)
-     
-     # Get the actual hidden size from the loaded model
-      actual_hidden_size = self.transformer.config.hidden_size
-      print(f"Actual model hidden size: {actual_hidden_size}")
-      
-     # Update config if needed
-      if actual_hidden_size != config.hidden_size:
+        # Load pre-trained transformer
+        self.tokenizer = AutoTokenizer.from_pretrained(config.base_model)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+        self.transformer = AutoModel.from_pretrained(config.base_model)
+        
+        # Get the actual hidden size from the loaded model
+        actual_hidden_size = self.transformer.config.hidden_size
+        print(f"Actual model hidden size: {actual_hidden_size}")
+        
+        # Update config if needed
+        if actual_hidden_size != config.hidden_size:
             print(f"Warning: Config hidden_size ({config.hidden_size}) != actual hidden_size ({actual_hidden_size})")
             print(f"Using actual hidden_size: {actual_hidden_size}")
             config.hidden_size = actual_hidden_size
             
-     # Audio feature projection layer
-      self.audio_projection = nn.Linear(config.audio_hidden_size, config.hidden_size)
+        # Audio feature projection layer
+        self.audio_projection = nn.Linear(config.audio_hidden_size, config.hidden_size)
 
-     # Multimodal fusion layer
-      self.fusion_layer = nn.Sequential(
+        # Multimodal fusion layer
+        self.fusion_layer = nn.Sequential(
             nn.Linear(config.hidden_size * 2, config.hidden_size),
             nn.ReLU(),
             nn.Dropout(config.dropout_rate)
         )
 
-      # Emotion classification head (enhanced with audio)
-      self.emotion_classifier = nn.Sequential(
+        # Emotion classification head (enhanced with audio)
+        self.emotion_classifier = nn.Sequential(
             nn.Linear(config.hidden_size, config.hidden_size // 2),
             nn.ReLU(),
             nn.Dropout(config.dropout_rate),
             nn.Linear(config.hidden_size // 2, len(config.emotion_classes))
         )
 
-      # Response generation head
-      self.response_generator = nn.Sequential(
+        # Response generation head
+        self.response_generator = nn.Sequential(
             nn.Linear(config.hidden_size, config.hidden_size),
             nn.ReLU(),
             nn.Dropout(config.dropout_rate),
             nn.Linear(config.hidden_size, self.tokenizer.vocab_size)
         )
 
-      # Emotion-conditioned attention
-      self.emotion_attention = nn.MultiheadAttention(
+        # Emotion-conditioned attention
+        self.emotion_attention = nn.MultiheadAttention(
             embed_dim=config.hidden_size,
             num_heads=config.num_attention_heads,
             dropout=config.dropout_rate
@@ -812,7 +840,6 @@ class EmotionalIntelligenceModel(nn.Module):
 
         return outputs
     
-
     def generate_response(self, input_text: str, audio_features: torch.Tensor = None,
                          max_length: int = 100, temperature: float = 0.7):
         """Generate an emotionally aware response with optional audio input"""
@@ -876,7 +903,7 @@ class EmotionalIntelligenceModel(nn.Module):
                 'has_audio_input': audio_features is not None
             }
 
-class EmotionalAITrainer: # Updated EmotionalAITrainer class with gradient accumulation
+class EmotionalAITrainer:
     """Training pipeline for the emotional intelligence model with integrated datasets"""
 
     def __init__(self, config: ModelConfig):
@@ -1046,7 +1073,7 @@ class EmotionalAITrainer: # Updated EmotionalAITrainer class with gradient accum
         return avg_loss, emotion_accuracy, all_predictions, all_labels
 
     def train_with_integrated_datasets(self):
-        """Train model using CREMA-D and OMG Emotion datasets"""
+        """Train model using CREMA-D and JL-Corpus datasets"""
         logger.info("Starting training with integrated datasets...")
 
         # Setup datasets
@@ -1141,9 +1168,9 @@ class EmotionalAITrainer: # Updated EmotionalAITrainer class with gradient accum
                 'total_val_samples': len(val_data),
                 'total_test_samples': len(test_data),
                 'crema_d_samples': len([d for d in train_data if d.get('dataset_source') == 'crema_d']),
-                'omg_train_samples': len([d for d in train_data if d.get('dataset_source') == 'omg_emotion']),
-                'omg_test_samples': len([d for d in test_data if d.get('dataset_source') == 'omg_emotion']),
-                'omg_val_samples': len([d for d in val_data if d.get('dataset_source') == 'omg_emotion'])
+                'jl_train_samples': len([d for d in train_data if d.get('dataset_source') == 'jl_corpus']),
+                'jl_test_samples': len([d for d in test_data if d.get('dataset_source') == 'jl_corpus']),
+                'jl_val_samples': len([d for d in val_data if d.get('dataset_source') == 'jl_corpus'])
             }
         }
 
@@ -1482,7 +1509,7 @@ def train_emotional_ai():
             print(f"📊 Dataset Statistics:")
             print(f"   • Total Training Samples: {results['dataset_info']['total_train_samples']:,}")
             print(f"   • CREMA-D Samples: {results['dataset_info']['crema_d_samples']:,}")
-            print(f"   • OMG Train Samples: {results['dataset_info']['omg_train_samples']:,}")
+            print(f"   • JL-Corpus Train Samples: {results['dataset_info']['jl_train_samples']:,}")
             print(f"   • Test Samples: {results['dataset_info']['total_test_samples']:,}")
             print(f"   • Validation Samples: {results['dataset_info']['total_val_samples']:,}")
 
@@ -1588,19 +1615,19 @@ def download_datasets_only():
 
         print("📥 Downloading datasets...")
         crema_success = downloader.download_crema_d()
-        omg_success = downloader.download_omg_emotion()
+        jl_success = downloader.download_jl_corpus()
 
         if crema_success:
             print("✅ CREMA-D dataset downloaded successfully")
         else:
             print("❌ CREMA-D download failed")
 
-        if omg_success:
-            print("✅ OMG Emotion dataset setup completed")
+        if jl_success:
+            print("✅ JL-Corpus dataset setup completed")
         else:
-            print("❌ OMG Emotion setup failed")
+            print("❌ JL-Corpus setup failed")
 
-        return crema_success and omg_success
+        return crema_success and jl_success
 
     except Exception as e:
         print(f"❌ Dataset download failed: {str(e)}")
@@ -1622,7 +1649,7 @@ def explore_datasets():
 
         # Process datasets
         crema_data = downloader.process_crema_d_data()
-        omg_data = downloader.process_omg_emotion_data()
+        jl_data = downloader.process_jl_corpus_data()
 
         print(f"📊 CREMA-D Dataset: {len(crema_data)} samples")
         if crema_data:
@@ -1632,9 +1659,9 @@ def explore_datasets():
             for emotion, count in emotion_counts.items():
                 print(f"     {emotion}: {count}")
 
-        print(f"\n📊 OMG Emotion Dataset: {len(omg_data)} samples")
-        if omg_data:
-            emotions = [d['emotion'] for d in omg_data]
+        print(f"\n📊 JL-Corpus Dataset: {len(jl_data)} samples")
+        if jl_data:
+            emotions = [d['emotion'] for d in jl_data]
             emotion_counts = pd.Series(emotions).value_counts()
             print("   Emotion Distribution:")
             for emotion, count in emotion_counts.items():
@@ -1651,7 +1678,7 @@ def explore_datasets():
 
         return {
             'crema_data': crema_data,
-            'omg_data': omg_data,
+            'jl_data': jl_data,
             'train_data': train_data,
             'test_data': test_data,
             'val_data': val_data
@@ -1984,7 +2011,7 @@ if __name__ == "__main__":
 
     # Enhanced training setup with integrated datasets
     def run_integrated_training():
-        """Run training with CREMA-D and OMG Emotion datasets"""
+        """Run training with CREMA-D and JL-Corpus datasets"""
         logger.info("🧠 Starting Emotional AI Training with Integrated Datasets")
 
         # Configuration
@@ -2003,7 +2030,7 @@ if __name__ == "__main__":
             logger.info(f"   - Final Test Accuracy: {results['final_test_accuracy']:.4f}")
             logger.info(f"   - Total Training Samples: {results['dataset_info']['total_train_samples']}")
             logger.info(f"   - CREMA-D Samples: {results['dataset_info']['crema_d_samples']}")
-            logger.info(f"   - OMG Emotion Train Samples: {results['dataset_info']['omg_train_samples']}")
+            logger.info(f"   - JL-Corpus Train Samples: {results['dataset_info']['jl_train_samples']}")
         else:
             logger.error("❌ Training failed!")
 
@@ -2019,47 +2046,3 @@ if __name__ == "__main__":
         # API server mode
         print("🌐 Starting API server...")
         uvicorn.run(app, host="0.0.0.0", port=8000)
-        self.emotion_classifier = nn.Sequential(
-            nn.Linear(config.hidden_size, config.hidden_size // 2),
-            nn.ReLU(),
-            nn.Dropout(config.dropout_rate),
-            nn.Linear(config.hidden_size // 2, len(config.emotion_classes))
-        )
-
-        # Response generation head
-        self.response_generator = nn.Sequential(
-            nn.Linear(config.hidden_size, config.hidden_size),
-            nn.ReLU(),
-            nn.Dropout(config.dropout_rate),
-            nn.Linear(config.hidden_size, self.tokenizer.vocab_size)
-        )
-
-        # Emotion-conditioned attention
-        self.emotion_attention = nn.MultiheadAttention(
-            embed_dim=config.hidden_size,
-            num_heads=config.num_attention_heads,
-            dropout=config.dropout_rate
-        )
-
-    def forward(self, input_ids, attention_mask, audio_features=None, response_ids=None, training=True):
-        # Get transformer outputs
-        transformer_outputs = self.transformer(
-            input_ids=input_ids,
-            attention_mask=attention_mask
-        )
-
-        # Extract hidden states
-        hidden_states = transformer_outputs.last_hidden_state
-        text_pooled = hidden_states.mean(dim=1)  # Global average pooling
-
-        # Process audio features if available
-        if audio_features is not None:
-            audio_projected = self.audio_projection(audio_features)
-
-            # Multimodal fusion
-            combined_features = torch.cat([text_pooled, audio_projected], dim=-1)
-            fused_output = self.fusion_layer(combined_features)
-        else:
-            fused_output = text_pooled
-
-        # Emotion classification
