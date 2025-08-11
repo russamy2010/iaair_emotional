@@ -71,21 +71,6 @@ except ImportError:
         KAGGLEHUB_AVAILABLE = False
         kagglehub = None
 
-try:
-    import youtube_dl
-    YOUTUBE_DL_AVAILABLE = True
-except ImportError:
-    print("Warning: youtube-dl not available. Installing...")
-    try:
-        subprocess.check_call(["pip", "install", "youtube-dl"])
-        import youtube_dl
-        YOUTUBE_DL_AVAILABLE = True
-        print("✅ YouTube-dl installed successfully!")
-    except Exception as e:
-        print(f"❌ Could not install YouTube-dl: {e}")
-        YOUTUBE_DL_AVAILABLE = False
-        youtube_dl = None
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1486,9 +1471,7 @@ def train_emotional_ai():
             missing_deps.append("OpenAI Whisper")
         if not KAGGLEHUB_AVAILABLE:
             missing_deps.append("Kagglehub")
-        if not YOUTUBE_DL_AVAILABLE:
-            missing_deps.append("YouTube-dl")
-
+            
         if missing_deps:
             print(f"⚠️ Warning: Some dependencies are missing: {', '.join(missing_deps)}")
             print("   Training will continue but some features may be limited.")
