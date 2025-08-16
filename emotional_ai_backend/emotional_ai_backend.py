@@ -777,6 +777,17 @@ class EmotionalIntelligenceModel(nn.Module):
         )
 
     def forward(self, input_ids, attention_mask, audio_features=None, response_ids=None, training=True):
+        #Ensure all inputs are on the same device
+        device = next(self.parameters()).device
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+        
+        if audio_features is not None:
+            audio_features = audio_features.to(device)
+            
+        if response_ids is not None:
+            response_ids = response_ids.to(device)
+            
         # Get transformer outputs
         transformer_outputs = self.transformer(
             input_ids=input_ids,
@@ -827,6 +838,11 @@ class EmotionalIntelligenceModel(nn.Module):
     
     def generate_response(self, input_text: str, audio_features: torch.Tensor = None,
                          max_length: int = 100, temperature: float = 0.7):
+        #Move inputs to the correct device
+        inputs={k:v.to(device) for k,v in inputs.item()}
+                             
+        #Ensure transformer is on the corect device
+        self.transformer=self.transform.to(device)
         """Generate an emotionally aware response with optional audio input"""
         self.eval()
 
@@ -887,6 +903,12 @@ class EmotionalIntelligenceModel(nn.Module):
                 },
                 'has_audio_input': audio_features is not None
             }
+    def to(self,device): 
+        """Override to method to ensure all components are moved to the same device"""
+        super().to(device)
+        if hasattr(self,'transformer'):
+            self.transformer=self.transformer.to(device)
+        return self
 
 class EmotionalAITrainer:
     """Training pipeline for the emotional intelligence model with integrated datasets"""
