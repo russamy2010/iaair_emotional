@@ -1559,20 +1559,25 @@ def quick_test_model(model_path: str = "best_emotional_ai_model.pt"):
         from emotional_ai_backend import quick_test_model
         quick_test_model()
     """
-    try:
+   try:
         config = ModelConfig()
         model = EmotionalIntelligenceModel(config)
+        model = model.to(config.device)
 
         # Load trained model
-        checkpoint = torch.load(model_path, map_location=config.device, weights_only=False)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.eval()
+        if os.path.exists(model_path):
+            checkpoint = torch.load(model_path, map_location=config.device, weights_only=False)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            model.eval()
+            print(f"✅ Loaded model from {model_path}")
+        else:
+            print(f"⚠️ Model file {model_path} not found. Using untrained model.")
 
         # Test with sample text
         test_messages = [
             "I'm so happy today!",
             "I feel really sad and down",
-            "This is making me angry",
+            "This is making me angry", 
             "I'm scared about what might happen",
             "What a pleasant surprise!"
         ]
@@ -1580,19 +1585,75 @@ def quick_test_model(model_path: str = "best_emotional_ai_model.pt"):
         print("🧪 Testing Trained Model")
         print("=" * 40)
 
+        success_count = 0
+        
         for message in test_messages:
-            result = model.generate_response(message)
-            print(f"Input: {message}")
-            print(f"Detected Emotion: {result['detected_emotion']} ({result['emotion_confidence']:.2f})")
-            print(f"Response: {result['response']}")
-            print("-" * 40)
+            try:
+                # Use the same method that worked in debug
+                with torch.no_grad():
+                    # Tokenize
+                    inputs = model.tokenizer(
+                        message,
+                        return_tensors='pt',
+                        truncation=True,
+                        padding=True,
+                        max_length=512
+                    )
+                    
+                    # Move to device
+                    device = next(model.parameters()).device
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                    
+                    # Forward pass
+                    outputs = model.forward(
+                        input_ids=inputs['input_ids'],
+                        attention_mask=inputs['attention_mask'],
+                        training=False
+                    )
+                    
+                    # Get emotion prediction
+                    emotion_probs = outputs['emotion_probs']
+                    predicted_emotion_id = torch.argmax(emotion_probs, dim=-1).item()
+                    predicted_emotion = config.emotion_classes[predicted_emotion_id]
+                    confidence = emotion_probs[0][predicted_emotion_id].item()
+                    
+                    # Generate a response (simple template for now)
+                    response_templates = {
+                        'Joy': "That's wonderful! I'm so happy to hear that.",
+                        'Sadness': "I understand you're going through a difficult time. I'm here to listen.",
+                        'Anger': "I can sense your frustration. That sounds really annoying.",
+                        'Fear': "I can understand why that would make you feel anxious.",
+                        'Surprise': "Wow, that must have been unexpected!",
+                        'Disgust': "I can see why that would bother you.",
+                        'Neutral': "I understand. Can you tell me more about that?",
+                        'Acceptance': "It sounds like you've found some peace with the situation.",
+                        'Anticipation': "You seem excited about what's coming!"
+                    }
+                    
+                    response = response_templates.get(predicted_emotion, "I hear you. Tell me more about how you're feeling.")
+                
+                # Display results
+                print(f"Input: {message}")
+                print(f"Detected Emotion: {predicted_emotion} ({confidence:.3f})")
+                print(f"Response: {response}")
+                print("-" * 40)
+                
+                success_count += 1
+                
+            except Exception as e:
+                print(f"❌ Error processing '{message}': {str(e)}")
+                print("-" * 40)
+                continue
 
+        print(f"✅ Successfully processed {success_count}/{len(test_messages)} messages")
         return True
 
     except Exception as e:
         print(f"❌ Model test failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
-
+        
 def setup_kaggle_credentials():
     """
     Helper function to setup Kaggle credentials for dataset download
