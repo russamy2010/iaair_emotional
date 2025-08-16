@@ -838,11 +838,6 @@ class EmotionalIntelligenceModel(nn.Module):
     
     def generate_response(self, input_text: str, audio_features: torch.Tensor = None,
                          max_length: int = 100, temperature: float = 0.7):
-        #Move inputs to the correct device
-        inputs={k:v.to(device) for k,v in inputs.item()}
-                             
-        #Ensure transformer is on the corect device
-        self.transformer=self.transform.to(device)
         """Generate an emotionally aware response with optional audio input"""
         self.eval()
 
@@ -855,6 +850,12 @@ class EmotionalIntelligenceModel(nn.Module):
                 padding=True,
                 max_length=self.config.max_sequence_length
             ).to(self.config.device)
+
+            # Move inputs to the correct device
+            inputs={k:v.to(device) for k,v in inputs.item()}
+                             
+            # Ensure transformer is on the corect device
+            self.transformer=self.transform.to(device)
 
             # Prepare audio features
             if audio_features is not None:
