@@ -1541,7 +1541,7 @@ def quick_test_model(model_path: str = "best_emotional_ai_model.pt"):
         model = EmotionalIntelligenceModel(config)
 
         # Load trained model
-        checkpoint = torch.load(model_path, map_location=config.device)
+        checkpoint = torch.load(model_path, map_location=config.device, weights_only=False)
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
 
