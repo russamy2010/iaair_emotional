@@ -852,7 +852,7 @@ class EmotionalIntelligenceModel(nn.Module):
             ).to(self.config.device)
 
             # Move inputs to the correct device
-            inputs={k:v.to(device) for k,v in inputs.item()}
+            inputs={k: v.to(device) for k,v in inputs.items()}
                              
             # Ensure transformer is on the corect device
             self.transformer=self.transform.to(device)
