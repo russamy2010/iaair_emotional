@@ -13,7 +13,7 @@ This supplementary material provides both the Python code to train the Emotional
 The app is designed to be easily deployable on Streamlit Cloud directly from a GitHub repository, enabling collaborative annotation efforts.
 
 Size:
-The total size of the supplementary material (source code for both the training file and application, initial data files, and this README) is approximately 5.43MB with sample audio (a total of 31 files). This does not include any audio files that users might upload during live application use, as those are stored ephemerally. The sample audio files are from the CREMA-D corpus located here: https://github.com/CheyneyComputerScience/CREMA-D/tree/master (full citation in paper: "The Empathetic Machine: The Introduction of Emotional Intelligence Recognition in Conversational AI"). 
+The total size of the supplementary material (source code for both the training file and application, initial data files, and this README) is approximately 5.04MB with sample audio (a total of 31 files); 5.26MB when sized on the disk (with sample audio of 31 files). This does not include any audio files that users might upload during live application use, as those are stored ephemerally. The sample audio files are from the CREMA-D corpus located here: https://github.com/CheyneyComputerScience/CREMA-D/tree/master (full citation in paper: "The Empathetic Machine: The Introduction of Emotional Intelligence Recognition in Conversational AI"). 
 
 Streamlit App Player Information:
 The primary component is a web application built with Streamlit.
@@ -35,7 +35,8 @@ Packing List:
 -   `data/`: Directory containing:
     -   `audio_files/`: Subdirectory for audio clips (e.g., `sample_audio.mp3`, `another_clip.wav`).
     -   `emotion_ratings.csv`: CSV file for storing annotation data. This file may be initially empty or contain sample data.
-- `emotional_ai_backend.py`: The Python code for the emotional intelligence AI model(i.e., the backend).
+- `emotional_ai_backend.py`: The Python code for the emotional intelligence AI model(i.e., the backend). This includes a separate module code to run the report
+- Amy_Russ_IAAIR_Summer_2025_Emotional_AI.ipynb: A Colab Notebook to run the code. To use this file, upload both the .py files to ephemeral storage in Colab from emotional_ai_backend and then run the cells.  
 -  `README.txt`: This file.
 
 Contact Information:
@@ -45,5 +46,6 @@ Institute of Applied Artificial Intelligence and Robotics (IAAIR) Summer 2025 Fe
 aruss5@vols.utk.com
 GitHub Profile: https://github.com/russamy2010 
 ORCID:0009-0009-8817-6791
+
 
 
