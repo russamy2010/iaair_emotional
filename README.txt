@@ -41,11 +41,11 @@ Packing List:
 
 Contact Information:
 Amy Russ
-Doctorate of Engineering Candidate, University of Tennessee-Knoxville
-Institute of Applied Artificial Intelligence and Robotics (IAAIR) Summer 2025 Fellow 
+Doctorate of Engineering (D.Eng) Candidate, University of Tennessee
 aruss5@vols.utk.com
 GitHub Profile: https://github.com/russamy2010 
 ORCID:0009-0009-8817-6791
+
 
 
 
